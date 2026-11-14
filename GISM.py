@@ -1,14 +1,13 @@
 # Import libraries
 import PyRayHF
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
 from PyRayHF.library import constants
 from PyRayHF.library import find_X, find_Y, find_mu_mup
 from PyRayHF.library import build_mup_function
 from PyRayHF.library import build_refractive_index_interpolator_spherical
 from PyRayHF.library import trace_ray_spherical_gradient
 import time
+from scipy.constants import mu_0, epsilon_0
 
 # Select the day and Universal Time of interest
 year = 2026
@@ -140,11 +139,54 @@ running_value = 0
 for d in dists:
     total_dist.append(d + running_value)
     running_value += d
-idx = None
+idx = -1
 for x in x_values:
-    if x == result_O["ground_range_km"]:
-        idx = total_dist.index(d)
+  idx += 1
+  if x == result_O["ground_range_km"]:
         break
-print(idx)
 total_dist = total_dist[:idx]
-print(total_dist)
+x_values = x_values[:idx]
+z_values = z_values[:idx]
+
+indexes = []
+index = -1
+current_v = 0
+last_v = None
+for d in total_dist:
+  index += 1
+  if d == current_v:
+    current_v += delta_z
+    indexes.append(index)
+  elif last_v < current_v and d > current_v:
+    current_v += delta_z
+    indexes.append(index)
+  last_v = d
+index_zs = []
+index_ds = []
+index_xs = []
+for i in indexes:
+   index_zs.append(z_values[i])
+   index_xs.append(x_values[i])
+   index_ds.append(total_dist[i])
+
+# Create Gausian Noise in the Complex Domain (Will be done in the model code as an input rather than in the python)
+rng = np.random.default_rng(seed=42)
+N = 1000
+total_std_dev = 0.5  # Desired total standard deviation (sqrt of total noise power)
+
+# Split power equally between real and imaginary components
+component_std = total_std_dev / np.sqrt(2)
+
+real_part = rng.normal(loc=0.0, scale=component_std, size=N)
+imag_part = rng.normal(loc=0.0, scale=component_std, size=N)
+
+# Combine into a complex128 array
+complex_noise = real_part + 1j * imag_part
+
+# TODO Real Epsilon Values
+omega = 2 * np.pi * f0_Hz
+epsilon_r_v = 123
+k = np.sqrt( np.pow(omega, 2) * mu_0 * epsilon_0 * epsilon_r_v)
+epsilon_1 = 123 # test value for now, defined later
+complex_noise_through_phase = complex_noise * np.exp(1j * k * delta_z * epsilon_1 / 2)
+

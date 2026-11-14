@@ -8,7 +8,8 @@ from PyRayHF.library import build_refractive_index_interpolator_spherical
 from PyRayHF.library import trace_ray_spherical_gradient
 import time
 from scipy.constants import mu_0, epsilon_0
-
+import scipy
+from scipy.special import gamma
 # Select the day and Universal Time of interest
 year = 2026
 month = 11
@@ -169,24 +170,30 @@ for i in indexes:
    index_xs.append(x_values[i])
    index_ds.append(total_dist[i])
 
-# Create Gausian Noise in the Complex Domain (Will be done in the model code as an input rather than in the python)
+# Phase Screen 1D for now, 2d if time
+q_0 = np.pi # TODO real value (2 < pi/L0 and L0 is the outer scale of the  inhomogeneities.) Set in the paper #param
+p = 3 # TODO real value (p is the spectrum slope. The spectrum is consequently  linear using Log-Log scales.) Value is set as a defualt in the paper #param
+sigma_phi = 5 # TODO real value (phase variance that comes from spectrum slope)
+def f(lag):
+  return (pow(sigma_phi, 2) / ( pow(2, (p-3)/2) * gamma((p-1)/2) ) ) * pow((lag * q_0), ((p-1)/2)) * scipy.special.kv(((p-1)/2),(lag*q_0)) 
+
+M = 2048
+max_lag = 10.0
+lag = np.linspace(0, max_lag, M)
+
+B_phi = np.asarry(f(lag), dtype=float)
+
+if np.isnan(B_phi[0]):
+  B_phi[0] = f(1e-12)
+
+acf_symmetric = np.concatenate([B_phi, B_phi[-2:0:-1]])
+N = len(acf_symmetric)
+
+psd = np.maximum(np.real(np.fft.fft(acf_symmetric)), 0)
+
 rng = np.random.default_rng(seed=42)
-N = 1000
-total_std_dev = 0.5  # Desired total standard deviation (sqrt of total noise power)
+white_noise_fft = rng.standard_normal(N) + 1j * rng.standard_normal(N)
 
-# Split power equally between real and imaginary components
-component_std = total_std_dev / np.sqrt(2)
+random_spectrum = np.sqrt(psd / 2.0) * white_noise_fft
 
-real_part = rng.normal(loc=0.0, scale=component_std, size=N)
-imag_part = rng.normal(loc=0.0, scale=component_std, size=N)
-
-# Combine into a complex128 array
-complex_noise = real_part + 1j * imag_part
-
-# TODO Real Epsilon Values
-omega = 2 * np.pi * f0_Hz
-epsilon_r_v = 123
-k = np.sqrt( np.pow(omega, 2) * mu_0 * epsilon_0 * epsilon_r_v)
-epsilon_1 = 123 # test value for now, defined later
-complex_noise_through_phase = complex_noise * np.exp(1j * k * delta_z * epsilon_1 / 2)
-
+synthetic_data = np.real(np.fft.ifft(random_spectrum)) * np.sqrt(N)
